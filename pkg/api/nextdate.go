@@ -47,6 +47,10 @@ func NextDate(now time.Time, dstart string, repeat string) (string, error) {
 		}
 		return date.Format(DateFormat), nil
 
+	case "w":
+
+		return "", fmt.Errorf("unsupported repeat rule: %s", repeat)
+
 	default:
 		return "", fmt.Errorf("unsupported repeat rule: %s", repeat)
 	}
@@ -101,3 +105,5 @@ func nextDateHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, next)
 }
+
+//

@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"final/pkg/db"
-	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,50 +17,67 @@ func writeJson(w http.ResponseWriter, data any) {
 }
 
 func checkDate(task *db.Task) error {
-	now := time.Now()
-	today := now.Truncate(24 * time.Hour)
-
-	if task.Date == "" {
-		task.Date = now.Format("20060102")
-	}
-
-	t, err := time.Parse("20060102", task.Date)
+	date, err := time.Parse("20060102", task.Date)
 	if err != nil {
-		return errors.New("неверный формат даты")
+		return errors.New("дата представлена в формате, отличном от 20060102")
 	}
 
-	if task.Repeat != "" {
-		if !t.After(today) {
-			next, err := NextDate(now, task.Date, task.Repeat)
-			if err != nil {
-				return errors.New("неверный формат правила повторения")
-			}
-			task.Date = next
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	if date.Before(today) && task.Repeat != "" {
+		newDate, err := shiftDate(date, task.Repeat)
+		if err != nil {
+			return errors.New("правило повторения указано в неправильном формате")
 		}
-	} else {
-		// ВАЖНО: возможно убрать проверку на дату в прошлом и не возвращать ошибку
-		// или заменить её на предупреждение, если в тестах так нужно.
-		if !t.After(today) {
-			// вместо ошибки просто выставляем дату на сегодня или на завтра?
-			// или убираем это условие, если так тесты хотят
-			return errors.New("дата задачи в прошлом")
-		}
+		task.Date = newDate.Format("20060102")
+
+		date = newDate
+	}
+
+	if date.Before(today) {
+		return errors.New("дата не может быть в прошлом")
 	}
 
 	return nil
 }
 
+func shiftDate(from time.Time, repeat string) (time.Time, error) {
+	parts := strings.Fields(repeat)
+	if len(parts) != 2 {
+		return time.Time{}, errors.New("неправильный формат правила повторения")
+	}
+
+	unit := parts[0]
+	n, err := strconv.Atoi(parts[1])
+	if err != nil || n <= 0 {
+		return time.Time{}, errors.New("неправильное число в правиле повторения")
+	}
+
+	next := from
+	today := time.Now()
+	for !next.After(today) {
+		switch unit {
+		case "d":
+			next = next.AddDate(0, 0, n)
+		case "w":
+			next = next.AddDate(0, 0, 7*n)
+		case "m":
+			next = next.AddDate(0, n, 0)
+		case "y":
+			next = next.AddDate(n, 0, 0)
+		default:
+			return time.Time{}, errors.New("неподдерживаемая единица повтора")
+		}
+	}
+
+	return next, nil
+}
+
 func addTaskHandler(w http.ResponseWriter, r *http.Request, dbConn *sql.DB) {
 	var task db.Task
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeJson(w, map[string]string{"error": "ошибка чтения тела запроса"})
-		return
-	}
-	defer r.Body.Close()
-
-	if err := json.Unmarshal(body, &task); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
 		writeJson(w, map[string]string{"error": "ошибка десериализации JSON"})
 		return
 	}
@@ -77,9 +94,11 @@ func addTaskHandler(w http.ResponseWriter, r *http.Request, dbConn *sql.DB) {
 
 	id, err := db.AddTask(dbConn, &task)
 	if err != nil {
-		writeJson(w, map[string]string{"error": "ошибка при добавлении задачи в базу"})
+		writeJson(w, map[string]string{"error": "ошибка базы данных: " + err.Error()})
 		return
 	}
 
-	writeJson(w, map[string]string{"id": strconv.FormatInt(id, 10)})
+	writeJson(w, map[string]int64{"id": id})
 }
+
+//

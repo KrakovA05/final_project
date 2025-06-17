@@ -1,9 +1,11 @@
 package db
 
-import "database/sql"
+import (
+	"database/sql"
+)
 
 type Task struct {
-	ID      string `json:"id"`
+	ID      int64  `json:"id,omitempty"`
 	Date    string `json:"date"`
 	Title   string `json:"title"`
 	Comment string `json:"comment"`
@@ -18,3 +20,5 @@ func AddTask(db *sql.DB, task *Task) (int64, error) {
 	}
 	return res.LastInsertId()
 }
+
+//
