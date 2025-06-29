@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,100 +11,82 @@ import (
 
 const DateFormat = "20060102"
 
-func NextDate(now time.Time, dstart string, repeat string) (string, error) {
-	if repeat == "" {
-		return "", fmt.Errorf("repeat rule is empty")
-	}
-
-	date, err := time.Parse(DateFormat, dstart)
+func NextDate(now time.Time, dateStr, repeat string) (string, error) {
+	date, err := time.Parse("20060102", dateStr)
 	if err != nil {
-		return "", fmt.Errorf("invalid dstart date format: %w", err)
+		return "", err
 	}
 
-	parts := strings.SplitN(repeat, " ", 2)
-	rule := parts[0]
+	// обрезаем время
+	now = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
-	switch rule {
-	case "y":
-		for !afterNow(date, now) {
+	// без повтора
+	if repeat == "" {
+		if !date.After(now) {
+			return "", nil
+		}
+		return date.Format("20060102"), nil
+	}
+
+	if repeat == "y" {
+		date = date.AddDate(1, 0, 0) // всегда прибавляем хотя бы 1 раз
+		for !date.After(now) {
 			date = date.AddDate(1, 0, 0)
 		}
-		return date.Format(DateFormat), nil
-
-	case "d":
-		if len(parts) != 2 {
-			return "", fmt.Errorf("repeat d rule missing interval")
-		}
-		daysStr := strings.TrimSpace(parts[1])
-		interval, err := strconv.Atoi(daysStr)
-		if err != nil {
-			return "", fmt.Errorf("invalid interval for d rule: %w", err)
-		}
-		if interval < 1 || interval > 400 {
-			return "", fmt.Errorf("d interval must be between 1 and 400")
-		}
-		for !afterNow(date, now) {
-			date = date.AddDate(0, 0, interval)
-		}
-		return date.Format(DateFormat), nil
-
-	case "w":
-
-		return "", fmt.Errorf("unsupported repeat rule: %s", repeat)
-
-	default:
-		return "", fmt.Errorf("unsupported repeat rule: %s", repeat)
+		return date.Format("20060102"), nil
 	}
+
+	if strings.HasPrefix(repeat, "d ") {
+		parts := strings.Fields(repeat)
+		if len(parts) != 2 {
+			return "", nil
+		}
+		days, err := strconv.Atoi(parts[1])
+		if err != nil || days <= 0 || days > 400 {
+			return "", nil
+		}
+		date = date.AddDate(0, 0, days) // всегда сдвиг
+		for !date.After(now) {
+			date = date.AddDate(0, 0, days)
+		}
+		return date.Format("20060102"), nil
+	}
+
+	return "", errors.New("неподдерживаемый repeat")
 }
 
+// Переаботал и упростил функцию afterNow
 func afterNow(date, now time.Time) bool {
-	y1, m1, d1 := date.Date()
-	y2, m2, d2 := now.Date()
-
-	if y1 > y2 {
-		return true
-	} else if y1 == y2 {
-		if m1 > m2 {
-			return true
-		} else if m1 == m2 {
-			return d1 > d2
-		}
-	}
-	return false
+	return date.After(now)
 }
 
 // HTTP обработчик
 func nextDateHandler(w http.ResponseWriter, r *http.Request) {
-	nowStr := r.FormValue("now")
-	if nowStr == "" {
-		nowStr = time.Now().Format(DateFormat)
-	}
-	now, err := time.Parse(DateFormat, nowStr)
-	if err != nil {
-		http.Error(w, "invalid now parameter: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	date := r.FormValue("date")
-	if date == "" {
-		http.Error(w, "missing date parameter", http.StatusBadRequest)
-		return
-	}
-
+	dateStr := r.FormValue("date")
 	repeat := r.FormValue("repeat")
-	if repeat == "" {
-		http.Error(w, "missing repeat parameter", http.StatusBadRequest)
-		return
+	nowStr := r.FormValue("now")
+
+	var now time.Time
+	var err error
+
+	if nowStr != "" {
+		now, err = time.Parse("20060102", nowStr)
+		if err != nil {
+			writeJson(w, map[string]string{"error": "неверный параметр now"})
+			return
+		}
+	} else {
+		now = time.Now()
 	}
 
-	next, err := NextDate(now, date, repeat)
+	// 🔧 Обрезаем время
+	now = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	next, err := NextDate(now, dateStr, repeat)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeJson(w, map[string]string{"error": err.Error()})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, next)
 }
-
-//

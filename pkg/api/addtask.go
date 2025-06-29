@@ -3,11 +3,9 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"final/pkg/db"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -17,61 +15,33 @@ func writeJson(w http.ResponseWriter, data any) {
 }
 
 func checkDate(task *db.Task) error {
-	date, err := time.Parse("20060102", task.Date)
-	if err != nil {
-		return errors.New("дата представлена в формате, отличном от 20060102")
-	}
-
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
-	if date.Before(today) && task.Repeat != "" {
-		newDate, err := shiftDate(date, task.Repeat)
-		if err != nil {
-			return errors.New("правило повторения указано в неправильном формате")
-		}
-		task.Date = newDate.Format("20060102")
-
-		date = newDate
+	if task.Date == "" {
+		task.Date = today.Format("20060102")
+		return nil
 	}
 
-	if date.Before(today) {
-		return errors.New("дата не может быть в прошлом")
+	t, err := time.Parse("20060102", task.Date)
+	if err != nil {
+		return err
+	}
+
+	next, err := NextDate(today, task.Date, task.Repeat)
+	if err != nil {
+		return err
+	}
+
+	if afterNow(today, t) {
+		if len(task.Repeat) == 0 {
+			task.Date = today.Format("20060102")
+		} else {
+			task.Date = next
+		}
 	}
 
 	return nil
-}
-
-func shiftDate(from time.Time, repeat string) (time.Time, error) {
-	parts := strings.Fields(repeat)
-	if len(parts) != 2 {
-		return time.Time{}, errors.New("неправильный формат правила повторения")
-	}
-
-	unit := parts[0]
-	n, err := strconv.Atoi(parts[1])
-	if err != nil || n <= 0 {
-		return time.Time{}, errors.New("неправильное число в правиле повторения")
-	}
-
-	next := from
-	today := time.Now()
-	for !next.After(today) {
-		switch unit {
-		case "d":
-			next = next.AddDate(0, 0, n)
-		case "w":
-			next = next.AddDate(0, 0, 7*n)
-		case "m":
-			next = next.AddDate(0, n, 0)
-		case "y":
-			next = next.AddDate(n, 0, 0)
-		default:
-			return time.Time{}, errors.New("неподдерживаемая единица повтора")
-		}
-	}
-
-	return next, nil
 }
 
 func addTaskHandler(w http.ResponseWriter, r *http.Request, dbConn *sql.DB) {
@@ -101,4 +71,135 @@ func addTaskHandler(w http.ResponseWriter, r *http.Request, dbConn *sql.DB) {
 	writeJson(w, map[string]int64{"id": id})
 }
 
-//
+func getTaskHandler(w http.ResponseWriter, r *http.Request, dbConn *sql.DB) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeJson(w, map[string]string{"error": "Не указан идентификатор"})
+		return
+	}
+
+	task, err := db.GetTask(dbConn, id)
+	if err != nil {
+		writeJson(w, map[string]string{"error": "Задача не найдена"})
+		return
+	}
+
+	writeJson(w, map[string]string{
+		"id":      id,
+		"date":    task.Date,
+		"title":   task.Title,
+		"comment": task.Comment,
+		"repeat":  task.Repeat,
+	})
+}
+
+func updateTaskHandler(w http.ResponseWriter, r *http.Request, dbConn *sql.DB) {
+	type inputTask struct {
+		ID      string `json:"id"`
+		Date    string `json:"date"`
+		Title   string `json:"title"`
+		Comment string `json:"comment"`
+		Repeat  string `json:"repeat"`
+	}
+
+	var input inputTask
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeJson(w, map[string]string{"error": "ошибка десериализации JSON"})
+		return
+	}
+
+	if input.ID == "" {
+		writeJson(w, map[string]string{"error": "не указан идентификатор"})
+		return
+	}
+	idInt, err := strconv.ParseInt(input.ID, 10, 64)
+	if err != nil {
+		writeJson(w, map[string]string{"error": "неверный формат id"})
+		return
+	}
+
+	if input.Title == "" {
+		writeJson(w, map[string]string{"error": "не указан заголовок задачи"})
+		return
+	}
+
+	task := db.Task{
+		ID:      idInt,
+		Date:    input.Date,
+		Title:   input.Title,
+		Comment: input.Comment,
+		Repeat:  input.Repeat,
+	}
+
+	if err := checkDate(&task); err != nil {
+		writeJson(w, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if err := db.UpdateTask(dbConn, &task); err != nil {
+		writeJson(w, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJson(w, map[string]string{})
+}
+
+func deleteTaskHandler(w http.ResponseWriter, r *http.Request, dbConn *sql.DB) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeJson(w, map[string]string{"error": "не указан идентификатор"})
+		return
+	}
+
+	err := db.DeleteTask(dbConn, id)
+	if err != nil {
+		writeJson(w, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJson(w, map[string]string{}) // успешный ответ — пустой JSON
+}
+
+func doneTaskHandler(w http.ResponseWriter, r *http.Request, dbConn *sql.DB) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeJson(w, map[string]string{"error": "не указан идентификатор"})
+		return
+	}
+
+	task, err := db.GetTask(dbConn, id)
+	if err != nil {
+		writeJson(w, map[string]string{"error": "задача не найдена"})
+		return
+	}
+
+	if task.Repeat == "" {
+		if err := db.DeleteTask(dbConn, id); err != nil {
+			writeJson(w, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJson(w, map[string]string{})
+		return
+	}
+
+	// Парсим текущую дату задачи
+	date, err := time.Parse("20060102", task.Date)
+	if err != nil {
+		writeJson(w, map[string]string{"error": "неверный формат даты"})
+		return
+	}
+
+	next, err := NextDate(date, task.Date, task.Repeat)
+
+	if err != nil {
+		writeJson(w, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if err := db.UpdateDate(dbConn, next, id); err != nil {
+		writeJson(w, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJson(w, map[string]string{})
+}
