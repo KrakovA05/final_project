@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"final/pkg/db"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -30,7 +31,7 @@ func checkDate(task *db.Task) error {
 
 	next, err := NextDate(today, task.Date, task.Repeat)
 	if err != nil {
-		return err
+		return fmt.Errorf("wrong repeat format: %w", err)
 	}
 
 	if afterNow(today, t) {
@@ -104,7 +105,10 @@ func updateTaskHandler(w http.ResponseWriter, r *http.Request, dbConn *sql.DB) {
 
 	var input inputTask
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeJson(w, map[string]string{"error": "ошибка десериализации JSON"})
+		writeJson(w, map[string]string{
+			"error": fmt.Sprintf("ошибка десериализации JSON: %v", err),
+		})
+
 		return
 	}
 
