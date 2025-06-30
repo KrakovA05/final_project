@@ -22,8 +22,8 @@ type TasksResponse struct {
 func tasksHandler(w http.ResponseWriter, r *http.Request, dbConn *sql.DB) {
 	tasks, err := db.Tasks(dbConn, 50)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		writeJson(w, map[string]string{"error": "database error: " + err.Error()})
+		// Исправлено: добавляем статус 500
+		writeJson(w, http.StatusInternalServerError, map[string]string{"error": "database error: " + err.Error()})
 		return
 	}
 
@@ -42,5 +42,6 @@ func tasksHandler(w http.ResponseWriter, r *http.Request, dbConn *sql.DB) {
 		resp["tasks"] = append(resp["tasks"], taskMap)
 	}
 
-	writeJson(w, resp)
+	// Исправлено: добавляем статус 200 (ок)
+	writeJson(w, http.StatusOK, resp)
 }

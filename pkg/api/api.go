@@ -24,7 +24,7 @@ func Init(db *sql.DB) {
 			deleteTaskHandler(w, r, dbConn)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			writeJson(w, map[string]string{"error": "method not allowed"})
+			writeJson(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"}) // строка 27
 		}
 	})
 
@@ -33,7 +33,7 @@ func Init(db *sql.DB) {
 			doneTaskHandler(w, r, dbConn)
 		} else {
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			writeJson(w, map[string]string{"error": "method not allowed"})
+			writeJson(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"}) // строка 36
 		}
 	})
 
@@ -43,7 +43,7 @@ func Init(db *sql.DB) {
 			tasksHandler(w, r, dbConn)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			writeJson(w, map[string]string{"error": "method not allowed"})
+			writeJson(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"}) // строка 46
 		}
 	})
 

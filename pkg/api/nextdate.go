@@ -2,7 +2,6 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -72,21 +71,25 @@ func nextDateHandler(w http.ResponseWriter, r *http.Request) {
 	if nowStr != "" {
 		now, err = time.Parse("20060102", nowStr)
 		if err != nil {
-			writeJson(w, map[string]string{"error": "неверный параметр now"})
+			writeJson(w, http.StatusBadRequest, map[string]string{"error": "неверный параметр now"})
 			return
 		}
 	} else {
 		now = time.Now()
 	}
 
-	// 🔧 Обрезаем время
 	now = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
 	next, err := NextDate(now, dateStr, repeat)
 	if err != nil {
-		writeJson(w, map[string]string{"error": err.Error()})
+		writeJson(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
-	fmt.Fprint(w, next)
+	if next == "" {
+		writeJson(w, http.StatusOK, map[string]string{"next": ""})
+		return
+	}
+
+	writeJson(w, http.StatusOK, map[string]string{"next": next})
 }
