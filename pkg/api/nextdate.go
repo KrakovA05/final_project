@@ -71,7 +71,7 @@ func nextDateHandler(w http.ResponseWriter, r *http.Request) {
 	if nowStr != "" {
 		now, err = time.Parse("20060102", nowStr)
 		if err != nil {
-			writeJson(w, http.StatusBadRequest, map[string]string{"error": "неверный параметр now"})
+			http.Error(w, "неверный параметр now", http.StatusBadRequest)
 			return
 		}
 	} else {
@@ -82,14 +82,11 @@ func nextDateHandler(w http.ResponseWriter, r *http.Request) {
 
 	next, err := NextDate(now, dateStr, repeat)
 	if err != nil {
-		writeJson(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if next == "" {
-		writeJson(w, http.StatusOK, map[string]string{"next": ""})
-		return
-	}
-
-	writeJson(w, http.StatusOK, map[string]string{"next": next})
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(next))
 }
